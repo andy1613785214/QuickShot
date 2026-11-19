@@ -8,10 +8,9 @@ private let hotkeyCallback: EventHandlerUPP = { _, event, context in
     guard let event, let context,
           GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID),
                             nil, MemoryLayout.size(ofValue: id), nil, &id) == noErr,
-          id.signature == signature, [1, 2].contains(id.id) else { return OSStatus(eventNotHandledErr) }
+          id.signature == signature, [1, 2, 3].contains(id.id) else { return OSStatus(eventNotHandledErr) }
     let app = Unmanaged<App>.fromOpaque(context).takeUnretainedValue()
-    let key = id.id
-    DispatchQueue.main.async { app.handleKey(key) }
+    app.handleKey(id.id)
     return noErr
 }
 
@@ -27,6 +26,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDelega
     var previous: NSRunningApplication?
     var handler: EventHandlerRef?
     var hotkey: EventHotKeyRef?
+    var draftHotkey: EventHotKeyRef?
     var chord: EventHotKeyRef?
     var pending: DispatchWorkItem?
     var draft = false
@@ -35,6 +35,11 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDelega
     var showingMenu = false
 
     func handleKey(_ key: UInt32) {
+        if key == 3 {
+            endChord()
+            captureDraft()
+            return
+        }
         if key == 2 {
             guard pending != nil else { return }
             endChord()
@@ -43,7 +48,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDelega
         }
         guard pending == nil, !busy, !showingMenu else { return }
         let registered = RegisterEventHotKey(UInt32(kVK_ANSI_C), UInt32(optionKey),
-            EventHotKeyID(signature: signature, id: 2), GetApplicationEventTarget(), 0, &chord)
+            EventHotKeyID(signature: signature, id: 2), GetApplicationEventTarget(), UInt32(kEventHotKeyExclusive), &chord)
         guard registered == noErr else { capture(); return }
         let job = DispatchWorkItem { [weak self] in
             self?.endChord()
@@ -112,7 +117,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDelega
         let menu = NSMenu()
         menu.delegate = self
         menu.addItem(withTitle: "使用 iPhone 拍照    ⌥ S", action: #selector(capture), keyEquivalent: "").target = self
-        menu.addItem(withTitle: "拍照并放入 ChatGPT    ⌥ S+C", action: #selector(captureDraft), keyEquivalent: "").target = self
+        menu.addItem(withTitle: "拍照并放入 ChatGPT    ⌃⌥ S", action: #selector(captureDraft), keyEquivalent: "").target = self
         for (name, id) in ChatDraft.installed {
             let item = clientMenu.addItem(withTitle: name, action: #selector(selectClient(_:)), keyEquivalent: "")
             item.target = self
@@ -133,6 +138,11 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDelega
         if installed != noErr || RegisterEventHotKey(UInt32(kVK_ANSI_S), UInt32(optionKey),
             EventHotKeyID(signature: signature, id: 1), GetApplicationEventTarget(), 0, &hotkey) != noErr {
             statusLine.title = "⌥ S 注册失败，请从菜单拍照"
+        }
+        if installed != noErr || RegisterEventHotKey(UInt32(kVK_ANSI_S), UInt32(controlKey | optionKey),
+            EventHotKeyID(signature: signature, id: 3), GetApplicationEventTarget(),
+            UInt32(kEventHotKeyExclusive), &draftHotkey) != noErr {
+            statusLine.title = "⌃⌥S 已被占用，请从菜单拍照到 ChatGPT"
         }
         if Bundle.main.bundleURL.deletingLastPathComponent().path == "/Applications",
            !UserDefaults.standard.bool(forKey: "initialLoginConfigured") {
@@ -271,7 +281,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDelega
         if let frame = panel.screen?.visibleFrame {
             print("panelInset", frame.maxX - panel.frame.maxX, frame.maxY - panel.frame.maxY)
         }
-        print("hotkeyRegistered", hotkey != nil, "photoCommands", photoCommands(in: file).count)
+        print("hotkeyRegistered", hotkey != nil, "draftHotkeyRegistered", draftHotkey != nil, "photoCommands", photoCommands(in: file).count)
         NSApp.terminate(nil)
     }
 }
