@@ -151,7 +151,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDelega
 
     func anchorPanel(to screen: NSScreen?) {
         guard let frame = screen?.visibleFrame else { return }
-        panel.setFrameTopLeftPoint(NSPoint(x: frame.minX + 12, y: frame.maxY - 12))
+        panel.setFrameTopLeftPoint(NSPoint(x: frame.maxX - panel.frame.width - 12, y: frame.maxY - 12))
     }
 
     @objc func displaysChanged() {
@@ -261,7 +261,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDelega
 
     func probe() {
         if let frame = panel.screen?.visibleFrame {
-            print("panelInset", panel.frame.minX - frame.minX, frame.maxY - panel.frame.maxY)
+            print("panelInset", frame.maxX - panel.frame.maxX, frame.maxY - panel.frame.maxY)
         }
         print("hotkeyRegistered", hotkey != nil, "photoCommands", photoCommands(in: file).count)
         NSApp.terminate(nil)
