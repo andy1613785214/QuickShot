@@ -23,7 +23,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDelega
     let statusLine = NSMenuItem(title: "准备就绪", action: nil, keyEquivalent: "")
     let login = NSMenuItem(title: "登录时启动", action: #selector(toggleLogin), keyEquivalent: "")
     var bar: NSStatusItem!
-    var panel: NSWindow!
+    var panel: CaptureWindow!
     var previous: NSRunningApplication?
     var handler: EventHandlerRef?
     var hotkey: EventHotKeyRef?
@@ -73,10 +73,11 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDelega
     }
 
     func applicationDidFinishLaunching(_ note: Notification) {
-        panel = NSWindow(contentRect: receiver.bounds, styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        panel = CaptureWindow(contentRect: receiver.bounds, styleMask: [.titled, .closable], backing: .buffered, defer: false)
         panel.title = "QuickShot"
         panel.isReleasedWhenClosed = false
         panel.delegate = self
+        panel.isRestorable = false
         panel.titleVisibility = .hidden
         panel.titlebarAppearsTransparent = true
         panel.styleMask.insert(.fullSizeContentView)
@@ -103,7 +104,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDelega
         choose.frame = NSRect(x: 18, y: 18, width: 160, height: 32)
         [heading, message, choose].forEach(receiver.addSubview)
         receiver.received = { [weak self] success in
-            DispatchQueue.main.async { self?.finished(success) }
+            RunLoop.main.perform(inModes: [.common]) { self?.finished(success) }
         }
         bar = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         bar.button?.image = NSImage(systemSymbolName: "camera", accessibilityDescription: "QuickShot 拍照")
@@ -163,7 +164,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDelega
         anchorPanel(to: NSScreen.screens.first { $0.frame.contains(pointer) } ?? NSScreen.main)
         if !panel.isVisible { previous = NSWorkspace.shared.frontmostApplication }
         NSApp.activate(ignoringOtherApps: true)
-        panel.makeKeyAndOrderFront(nil)
+        panel.presentForCapture()
         panel.makeFirstResponder(receiver)
     }
 
@@ -218,11 +219,17 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDelega
     }
 
     func finished(_ success: Bool) {
-        guard success else { message.stringValue = "未能读取照片，请重新拍照。"; return }
+        let restoreFocus = NSApp.isActive
+        let returnTo = previous
+        previous = nil
+        panel.close()
+        guard success else {
+            statusLine.title = "未能读取照片，请重新拍照"
+            if restoreFocus { returnTo?.activate(options: []) }
+            return
+        }
         statusLine.title = "照片已复制 · " + DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .short)
         NSLog("QuickShot received and copied a photo")
-        let restoreFocus = NSApp.isActive
-        panel.orderOut(nil)
         if draft {
             ChatDraft.attach(change: NSPasteboard.general.changeCount) { [weak self] issue in
                 self?.statusLine.title = issue ?? "已向 ChatGPT 输入框请求粘贴照片"
@@ -233,9 +240,10 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDelega
                     alert.runModal()
                 }
             }
-        } else if restoreFocus { previous?.activate(options: []) }
-        previous = nil
+        } else if restoreFocus { returnTo?.activate(options: []) }
     }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
     func menuWillOpen(_ menu: NSMenu) {
         for item in clientMenu.items { item.state = (item.representedObject as? String) == ChatDraft.target ? .on : .off }
